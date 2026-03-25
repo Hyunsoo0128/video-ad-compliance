@@ -1,15 +1,15 @@
 """Step 3 – Phase 2: Pegasus Analyze for policy violation detection (§6).
 
 Single analyze() call checks all 5 policy categories simultaneously.
-Uses JSON Schema response_format for guaranteed structured output.
+Schema is embedded in the prompt text rather than using response_format,
+because json_schema enforcement mode suppresses audio-based violation
+detection in the current Pegasus 1.2 SDK (v1.3).
 """
 
 from __future__ import annotations
 
 import json
 import logging
-
-from twelvelabs.types import ResponseFormat
 
 from .client import get_client, retry_call
 from .config import POLICY_CODES
@@ -18,7 +18,9 @@ from .prompts import COMPLIANCE_PROMPT
 
 log = logging.getLogger(__name__)
 
-# JSON Schema enforced on Pegasus output – §6.3 / §6.6
+# JSON Schema for Pegasus output validation – §6.3 / §6.6
+# Embedded in prompt text instead of response_format to preserve
+# audio-based violation detection (see ADR-005 addendum).
 ANALYSIS_SCHEMA: dict = {
     "type": "object",
     "properties": {
@@ -50,14 +52,15 @@ def run_phase2(video_id: str, *, client=None) -> Phase2Result:
     """Analyze video for policy violations. Returns structured result."""
     client = client or get_client()
 
+    schema_hint = (
+        "\n\nYou MUST respond with a JSON object matching this schema:\n"
+        + json.dumps(ANALYSIS_SCHEMA, indent=2)
+    )
+
     result = retry_call(
         client.analyze,
         video_id=video_id,
-        prompt=COMPLIANCE_PROMPT,
-        response_format=ResponseFormat(
-            type="json_schema",
-            json_schema=ANALYSIS_SCHEMA,
-        ),
+        prompt=COMPLIANCE_PROMPT + schema_hint,
     )
 
     data = json.loads(result.data)

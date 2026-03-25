@@ -1,7 +1,10 @@
 """Compliance prompt for Pegasus analyze (§9).
 
 Structured with XML tags: system_instruction, policy_definitions,
-campaign_context, negative_examples, task.
+campaign_context, positive_examples, negative_examples, task.
+
+Audio analysis: The task section explicitly instructs Pegasus to analyze
+spoken words for profanity and medical claims, not just visual content.
 """
 
 COMPLIANCE_PROMPT = """
@@ -46,6 +49,14 @@ Product line: Foundation, eyeshadow palette, lip products
 Expected content: Makeup tutorials, GRWM, product reviews, beauty tips
 </campaign_context>
 
+<positive_examples>
+These ARE violations and MUST be flagged:
+- Spoken "fucking", "holy shit", "bullshit" → PROFANITY (HIGH if repeated, MEDIUM if once)
+- Spoken "this cures acne" or "treats eczema" → MEDICAL_CLAIMS (HIGH)
+- Spoken "removes wrinkles permanently" → MEDICAL_CLAIMS (MEDIUM)
+- Visible drug use while doing makeup → DRUGS_ILLEGAL (HIGH)
+</positive_examples>
+
 <negative_examples>
 Do NOT flag these as violations (common in beauty content):
 - "This color is killer / to die for" → NOT hate speech, it's positive slang
@@ -56,11 +67,20 @@ Do NOT flag these as violations (common in beauty content):
 </negative_examples>
 
 <task>
-Analyze this video thoroughly:
-1. Watch the entire video including all visual and audio content
-2. Check each of the 5 policy categories
-3. For each violation found, provide: category, severity, timestamp_start, timestamp_end (if applicable), and a specific reason
-4. Set overall_status: BLOCK if any HIGH severity, REVIEW if any MEDIUM, APPROVE if none or only LOW
-5. Write a 2-3 sentence summary of the video content
+You MUST follow these steps in order:
+
+Step A — Transcribe: Write out every word spoken in the video audio. Include this transcription in your summary.
+
+Step B — Analyze spoken words: Check the transcription for:
+  - Any profanity (f-word, s-word, etc.) → flag as PROFANITY
+  - Any medical/health claims about products (cures, treats, heals, removes wrinkles) → flag as MEDICAL_CLAIMS
+
+Step C — Analyze visual content: Check for:
+  - Hate/harassment, unsafe product use, drug references, or other visual violations
+
+Step D — Compile results:
+  - For each violation: provide category, severity, timestamp_start, timestamp_end (if applicable), and reason with exact quotes
+  - Set overall_status: BLOCK if any HIGH severity, REVIEW if any MEDIUM, APPROVE if none or only LOW
+  - Write a 2-3 sentence summary that includes key phrases from the audio transcription
 </task>
 """.strip()
