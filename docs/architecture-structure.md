@@ -99,13 +99,13 @@ All AI capabilities in this pipeline depend on two TwelveLabs models. Understand
 |---|---|
 | Role | Watches video and reasons/judges/generates in natural language |
 | SDK Methods | `client.analyze()`, `client.analyze_stream()` |
-| Output | Natural language text or JSON Schema-enforced output |
+| Output | Natural language text or JSON-structured output (schema embedded in prompt) |
 | Pipeline Stage | Phase 2 (Deep Analysis), Video summarization, Evidence generation |
 
 **Behavior during analyze calls:**
 - **Watches the indexed video from start to finish** (integrating visual + audio + on-screen text)
 - Performs reasoning according to prompt instructions
-- Specifying `response_format` with a JSON Schema guarantees 100% structured output
+- Specifying the JSON Schema in the prompt text produces reliable structured output while preserving full multimodal (visual + audio) analysis
 
 ### 2.3 Key Differences
 
@@ -300,51 +300,60 @@ Campaign relevance (the 6th category) was already handled in Phase 1, so only 5 
 
 ### 6.3 API Call
 
+> **Note**: The JSON Schema is embedded in the prompt text rather than passed via
+> `response_format`. The `response_format=json_schema` mode was found to suppress
+> audio-based violation detection (e.g., spoken profanity, medical claims) in
+> Pegasus 1.2 (SDK v1.3). Embedding the schema in the prompt preserves full
+> multimodal analysis while still producing structured JSON output.
+
 ```python
-from twelvelabs.types import ResponseFormat
+import json
+
+ANALYSIS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "overall_status": {
+            "type": "string",
+            "enum": ["APPROVE", "REVIEW", "BLOCK"]
+        },
+        "summary": {"type": "string"},
+        "violations": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "enum": [
+                            "HATE_HARASSMENT", "PROFANITY",
+                            "DRUGS_ILLEGAL", "UNSAFE_PRODUCT_USE",
+                            "MEDICAL_CLAIMS"
+                        ]
+                    },
+                    "severity": {
+                        "type": "string",
+                        "enum": ["HIGH", "MEDIUM", "LOW"]
+                    },
+                    "timestamp_start": {"type": "string"},
+                    "timestamp_end": {"type": "string"},
+                    "reason": {"type": "string"}
+                },
+                "required": ["category", "severity",
+                             "timestamp_start", "reason"]
+            }
+        }
+    },
+    "required": ["overall_status", "summary", "violations"]
+}
+
+schema_hint = (
+    "\n\nYou MUST respond with a JSON object matching this schema:\n"
+    + json.dumps(ANALYSIS_SCHEMA, indent=2)
+)
 
 result = client.analyze(
     video_id="<video_id>",
-    prompt=COMPLIANCE_PROMPT,  # Detailed in §9
-    response_format=ResponseFormat(
-        type="json_schema",
-        json_schema={
-            "type": "object",
-            "properties": {
-                "overall_status": {
-                    "type": "string",
-                    "enum": ["APPROVE", "REVIEW", "BLOCK"]
-                },
-                "summary": {"type": "string"},
-                "violations": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "category": {
-                                "type": "string",
-                                "enum": [
-                                    "HATE_HARASSMENT", "PROFANITY",
-                                    "DRUGS_ILLEGAL", "UNSAFE_PRODUCT_USE",
-                                    "MEDICAL_CLAIMS"
-                                ]
-                            },
-                            "severity": {
-                                "type": "string",
-                                "enum": ["HIGH", "MEDIUM", "LOW"]
-                            },
-                            "timestamp_start": {"type": "string"},
-                            "timestamp_end": {"type": "string"},
-                            "reason": {"type": "string"}
-                        },
-                        "required": ["category", "severity",
-                                     "timestamp_start", "reason"]
-                    }
-                }
-            },
-            "required": ["overall_status", "summary", "violations"]
-        }
-    )
+    prompt=COMPLIANCE_PROMPT + schema_hint,  # Detailed in §9
 )
 
 data = json.loads(result.data)
@@ -369,11 +378,18 @@ Pegasus re-watches the video from start to finish with every call. Unlike text L
 
 Additionally, a consolidated call shares context across categories. Example: "At 01:23, applying lip tint to the eyes while saying 'blemishes will disappear'" → both `UNSAFE_PRODUCT_USE` and `MEDICAL_CLAIMS` are triggered simultaneously. Separate calls may miss this correlation.
 
-### 6.6 Significance of JSON Schema Enforcement
+### 6.6 JSON Schema via Prompt Embedding
 
-- When `response_format` is specified, Pegasus **must** output only JSON conforming to the schema
-- `enum` constraints prevent the AI from inventing arbitrary categories or severities
-- 0% parse failure rate → ensures automation pipeline stability
+> **Changed from original design**: We originally used `response_format=json_schema`
+> for guaranteed structured output. However, testing revealed that this mode causes
+> Pegasus to suppress audio-based violation detection — spoken profanity and medical
+> claims were ignored even though the model could transcribe them correctly.
+> The schema is now embedded in the prompt text instead.
+
+- The JSON Schema is appended to the prompt as a text instruction
+- `enum` constraints still prevent the AI from inventing arbitrary categories or severities
+- Parse failure risk is minimal — Pegasus consistently returns valid JSON when instructed via prompt
+- If parsing does fail, the existing retry logic handles it (see §11.3)
 
 ### 6.7 Example Response
 
@@ -551,21 +567,27 @@ This summary is used by manual reviewers to understand context without watching 
   Brand name, product line, expected content types
 </campaign_context>
 
+<positive_examples>
+  Explicit examples of what MUST be flagged (e.g., spoken profanity, medical claims)
+</positive_examples>
+
 <negative_examples>
   List of acceptable expressions to prevent false positives
 </negative_examples>
 
 <task>
-  Specific analysis instructions
+  Specific analysis instructions (explicitly covers both visual and audio modalities)
 </task>
 ```
 
 ### 9.2 Core Principles
 
 1. **Enum constraints**: JSON Schema `enum` restricts categories and severities. Prevents the AI from generating arbitrary values
-2. **Negative prompting**: "Do not classify colloquial expressions like 'this color is killer' in makeup tutorials as hate speech"
-3. **Severity guidelines**: Explicitly state HIGH/MEDIUM/LOW judgment criteria per category in the prompt
-4. **XML tag separation**: Separate instructions, policies, and context with tags so the model doesn't confuse roles
+2. **Positive prompting**: Explicit examples of what MUST be flagged (e.g., spoken "fucking" → PROFANITY, spoken "cures acne" → MEDICAL_CLAIMS). Critical for ensuring audio-based violations are detected
+3. **Negative prompting**: "Do not classify colloquial expressions like 'this color is killer' in makeup tutorials as hate speech"
+4. **Severity guidelines**: Explicitly state HIGH/MEDIUM/LOW judgment criteria per category in the prompt
+5. **XML tag separation**: Separate instructions, policies, and context with tags so the model doesn't confuse roles
+6. **Multimodal coverage**: Task instructions explicitly require analysis of both visual content and spoken audio/narration
 
 ### 9.3 Video Context Engineering (TwelveLabs Framework)
 
@@ -718,8 +740,7 @@ Worker-level semaphore (concurrent request limit)
 
 ```python
 try:
-    result = client.analyze(video_id=vid, prompt=prompt,
-                            response_format=fmt)
+    result = client.analyze(video_id=vid, prompt=prompt)
     data = json.loads(result.data)
 except twelvelabs.core.ApiError as e:
     if e.status_code == 429:
@@ -729,7 +750,7 @@ except twelvelabs.core.ApiError as e:
     else:
         send_to_dlq(video_id, error=str(e))
 except json.JSONDecodeError:
-    retry_once()                   # Extremely rare
+    retry_once()                   # Possible without response_format enforcement
 ```
 
 ---
@@ -762,7 +783,7 @@ Indexing accounts for ~60%, the largest share. Once indexed, videos can be reuse
 
 | Model | Cost/min | Structured Output | Recommended Use |
 |---|---|---|---|
-| TwelveLabs Pegasus 1.2 | ~$2.79 | JSON Schema enforced | Policy analysis (recommended) |
+| TwelveLabs Pegasus 1.2 | ~$2.79 | Schema via prompt | Policy analysis (recommended) |
 | Google Gemini | ~$10.62 | Unstable | Auxiliary verification |
 | AWS Nova | ~$0.22 | Weak | Low-cost simple classification |
 
