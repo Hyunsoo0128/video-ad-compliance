@@ -89,6 +89,55 @@ $ ad-compliance --file test_beauty.mp4 -v
 
 6 clips matched → ON_BRIEF → Phase 2 policy analysis → no violations → APPROVE.
 
+### Beauty video with policy violations → BLOCK (PROFANITY + MEDICAL_CLAIMS)
+
+```
+$ ad-compliance --file test_beauty_violations.mp4 -v
+
+2026-03-25 14:04:28 INFO     ad_compliance.pipeline: === Step 0: Index ===
+2026-03-25 14:04:28 INFO     ad_compliance.indexing: Using existing index ad-compliance-prod
+2026-03-25 14:04:28 INFO     ad_compliance.pipeline: === Step 1: Ingest ===
+2026-03-25 14:04:28 INFO     ad_compliance.ingestion: Video already indexed (filename=test_beauty_violations.mp4)
+2026-03-25 14:04:28 INFO     ad_compliance.pipeline: === Step 2: Phase 1 (Search) ===
+2026-03-25 14:04:28 INFO     ad_compliance.phase1_search: Phase 1: matched_clips=3 score=1.000 label=ON_BRIEF
+2026-03-25 14:04:28 INFO     ad_compliance.pipeline: === Step 3: Phase 2 (Analyze) ===
+2026-03-25 14:04:36 INFO     ad_compliance.phase2_analyze: Phase 2: status=BLOCK violations=3
+2026-03-25 14:04:36 INFO     ad_compliance.pipeline: === Step 4: Decision ===
+2026-03-25 14:04:36 INFO     ad_compliance.pipeline: Decision=BLOCK confidence=0.80 route=REVIEW_QUEUE
+2026-03-25 14:04:36 INFO     ad_compliance.pipeline: === Step 5: Evidence Report ===
+{
+  "decision": "BLOCK",
+  "decision_reasoning": "HIGH severity violation detected: 2 case(s)",
+  "campaign_relevance": { "score": 1.0, "label": "ON_BRIEF" },
+  "policy_violations": [
+    {
+      "category": "MEDICAL_CLAIMS",
+      "severity": "HIGH",
+      "timestamp_start": "0s",
+      "timestamp_end": "10s",
+      "reason": "Spoken claim: 'cures my acne and heals all my skin problems'"
+    },
+    {
+      "category": "MEDICAL_CLAIMS",
+      "severity": "HIGH",
+      "timestamp_start": "10s",
+      "timestamp_end": "15s",
+      "reason": "Spoken claim: 'treats eczema and removes wrinkles permanently'"
+    },
+    {
+      "category": "PROFANITY",
+      "severity": "MEDIUM",
+      "timestamp_start": "0s",
+      "timestamp_end": "10s",
+      "reason": "Spoken expression: 'this fucking foundation is incredible'"
+    }
+  ],
+  "violation_summary": { "total": 3, "high": 2, "medium": 1, "low": 0 }
+}
+```
+
+3 clips matched → ON_BRIEF → Phase 2 detects spoken profanity and medical claims → BLOCK (HIGH severity violations).
+
 ## Pipeline Steps
 
 | Step | Module | Model | Description |
@@ -111,7 +160,7 @@ Uses `search.query` to find clips matching the campaign query.
 
 ## Phase 2: Policy Violation Analysis
 
-Single Pegasus `analyze()` call checks all 5 categories simultaneously with JSON Schema enforcement:
+Single Pegasus `analyze()` call checks all 5 categories simultaneously. The JSON Schema is embedded in the prompt text (not via `response_format`) to ensure full audio+visual analysis:
 
 1. **HATE_HARASSMENT** – Hateful speech, bullying, discrimination
 2. **PROFANITY** – Explicit language, vulgar expressions
