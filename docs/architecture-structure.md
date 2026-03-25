@@ -1,7 +1,7 @@
 # Ad Compliance Automation Pipeline
 # Architecture Design Document (For Developers)
 
-**Author**: Hyunsoo Kim  
+**Author**: Hyunsoo Kim
 **Audience**: Developers implementing and maintaining this system  
 **Scenario**: Global makeup brand creator video campaign  
 **Core Technology**: TwelveLabs Marengo 3.0 / Pegasus 1.2 (SDK v1.3)
@@ -48,7 +48,7 @@ flowchart LR
 
 ### 1.3 Why Two Phases
 
-- Phase 1 (Marengo Search): **Low cost, fast**. Checks campaign relevance only via embedding similarity search
+- Phase 1 (Marengo Search): **Low cost, fast**. Checks campaign relevance via search clip matching
 - Phase 2 (Pegasus Analyze): **High cost, precise**. Watches the entire video and reasons about policy violations
 
 By blocking irrelevant videos (15–25%) early in Phase 1, we proportionally reduce expensive Phase 2 calls. Off-brief videos are blocked anyway, so policy violation analysis is unnecessary for them.
@@ -419,10 +419,10 @@ The conditions below are evaluated **top to bottom**; the first matching conditi
 
 | Priority | Condition | Verdict |
 |---|---|---|
-| 1 | Campaign relevance `OFF_BRIEF` (score < 0.3) | **BLOCK** |
+| 1 | Campaign relevance `OFF_BRIEF` (no matched clips) | **BLOCK** |
 | 2 | Policy violation severity `HIGH` ≥ 1 | **BLOCK** |
 | 3 | Policy violation severity `MEDIUM` ≥ 1 | **REVIEW** |
-| 4 | Campaign relevance `BORDERLINE` (0.3 ≤ score < 0.6) | **REVIEW** |
+| 4 | Campaign relevance `BORDERLINE` | **REVIEW** |
 | 5 | Medical claims (`MEDICAL_CLAIMS`) severity `LOW` or above | **REVIEW** |
 | 6 | None of the above conditions met | **APPROVE** |
 
@@ -433,7 +433,7 @@ The conditions below are evaluated **top to bottom**; the first matching conditi
 ```python
 def decide(phase1_result, phase2_result):
     # 1. Off-brief → BLOCK
-    if phase1_result.score < 0.3:
+    if phase1_result.label == "OFF_BRIEF":
         return "BLOCK", "Off-brief: content unrelated to campaign"
 
     # 2. HIGH severity → BLOCK
@@ -447,7 +447,7 @@ def decide(phase1_result, phase2_result):
         return "REVIEW", f"MEDIUM severity violations detected: {len(mediums)}"
 
     # 4. Borderline relevance → REVIEW
-    if phase1_result.score < 0.6:
+    if phase1_result.label == "BORDERLINE":
         return "REVIEW", "Campaign relevance BORDERLINE"
 
     # 5. Medical claims (any severity) → REVIEW
@@ -672,9 +672,9 @@ Same score 0.5 → A is adjusted to 0.35, B is adjusted to 0.68
 
 ```mermaid
 flowchart TD
-    A["Ingestion\n& Indexing"] --> B["Phase 1\nEnsemble Score"]
-    B -->|"< 0.3"| X["BLOCK"]
-    B -->|">= 0.3"| C["Phase 2\nAnalyze"]
+    A["Ingestion\n& Indexing"] --> B["Phase 1\nClip Matching"]
+    B -->|"OFF_BRIEF"| X["BLOCK"]
+    B -->|"ON_BRIEF"| C["Phase 2\nAnalyze"]
     C --> D["Cross-Modal\nCheck"]
     D -->|Mismatch| E["Re-analyze"]
     D -->|Match| F["Multi-Signal\nScoring"]
