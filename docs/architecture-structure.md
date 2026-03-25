@@ -1,7 +1,7 @@
 # Ad Compliance Automation Pipeline
 # Architecture Design Document (For Developers)
 
-**Author**: Hyunsoo Kim
+**Author**: Hyunsoo Kim  
 **Audience**: Developers implementing and maintaining this system  
 **Scenario**: Global makeup brand creator video campaign  
 **Core Technology**: TwelveLabs Marengo 3.0 / Pegasus 1.2 (SDK v1.3)
