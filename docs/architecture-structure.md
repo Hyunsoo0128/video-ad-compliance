@@ -23,8 +23,6 @@
 11. [Infrastructure Architecture](#11-infrastructure-architecture)
 12. [Cost Structure and Optimization](#12-cost-structure-and-optimization)
 13. [Operations: Thresholds, False Positives, and Feedback Loop](#13-operations)
-14. [Future Roadmap](#14-future-roadmap)
-15. [References](#15-references)
 
 ---
 
